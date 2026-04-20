@@ -134,13 +134,14 @@
 (defn build-conversation-export-map
   [{:keys [conversationPageTitle journalIntDate]} new-records add-journal-link?]
   (let [conversation-page {:page {:block/title conversationPageTitle
-                                  :build/keep-uuid? true}
+                                  :build/keep-uuid? true
+                                  :build/tags [:user.class/Chat]}
                            :blocks (mapv ->message-block new-records)}
         journal-page {:page {:build/journal journalIntDate
                              :build/keep-uuid? true}
                       :blocks [{:block/title (str "[[" conversationPageTitle "]]")}]}]
     {:properties custom-properties
-     :classes {}
+     :classes {:user.class/Chat {}}
      :pages-and-blocks (cond-> [conversation-page]
                          add-journal-link? (conj journal-page))}))
 
@@ -168,12 +169,13 @@
     {:block/title text
      :block/created-at created-at
      :block/updated-at updated-at
-     :build/properties properties}))
+     :build/properties properties
+     :block/tags #{:user.class/Memory}}))
 
 (defn build-memory-export-map
   [records]
   {:properties custom-properties
-   :classes {}
+   :classes {:user.class/Memory {}}
    :pages-and-blocks [{:page {:build/journal (current-journal-int-date)
                               :build/keep-uuid? true}
                        :blocks (mapv ->memory-block records)}]})
@@ -190,20 +192,23 @@
 
 (defn sync-conversation!
   [conn {:keys [records journalIntDate] :as payload}]
-  (let [ids (->> records (map :id) (filter string?) vec)
-        existing-ids (property-id-set conn pi-message-id-property ids)
-        new-records (->> records
-                         (filter (fn [{:keys [id text]}]
-                                   (and (string? id)
-                                        (not (contains? existing-ids id))
-                                        (string? text)
-                                        (not= "" text))))
-                         vec)
-        add-journal-link? (not (journal-session-linked? conn (:conversationPageTitle payload) journalIntDate))
-        export-map (build-conversation-export-map payload new-records add-journal-link?)]
-    (transact-import! conn export-map)
-    {:createdMessages (count new-records)
-     :linkedInJournal add-journal-link?}))
+  (if (seq records)
+    (let [ids (->> records (map :id) (filter string?) vec)
+          existing-ids (property-id-set conn pi-message-id-property ids)
+          new-records (->> records
+                           (filter (fn [{:keys [id text]}]
+                                     (and (string? id)
+                                          (not (contains? existing-ids id))
+                                          (string? text)
+                                          (not= "" text))))
+                           vec)
+          add-journal-link? (not (journal-session-linked? conn (:conversationPageTitle payload) journalIntDate))
+          export-map (build-conversation-export-map payload new-records add-journal-link?)]
+      (transact-import! conn export-map)
+      {:createdMessages (count new-records)
+       :linkedInJournal add-journal-link?})
+    {:createdMessages 0
+     :linkedInJournal false}))
 
 (defn valid-memory-record?
   [{:keys [id text scope projectKey]}]

@@ -60,26 +60,29 @@
   [records]
   (let [preferred (or (first (filter #(and (= "user" (:role %)) (pos? (count (str/trim (:text %))))) records))
                       (first records))
-        raw (or (:text preferred) "Untitled")
-        compact (-> raw (str/replace #"\s+" " ") str/trim)
+        raw (some-> (:text preferred) str/trim)
+        compact (-> (or raw "") (str/replace #"\s+" " ") str/trim)
         sentence (or (some-> (first (str/split compact #"[.!?]")) str/trim)
                      compact)
         cleaned (-> sentence (str/replace #"[\[\]`*_~]" "") str/trim)]
-    (if (<= (count cleaned) 72)
-      cleaned
-      (str (str/trimr (subs cleaned 0 69)) "..."))))
+    (when (not= "" cleaned)
+      (if (<= (count cleaned) 72)
+        cleaned
+        (str (str/trimr (subs cleaned 0 69)) "...")))))
 
 (defn build-conversation-page-title
   [records session-timestamp]
   (let [date (if (is-valid-date? session-timestamp)
                (js/Date. session-timestamp)
-               (js/Date.))]
-    (str "Pi Conversation "
-         (format-iso-date date)
-         " "
-         (format-hour-minute date)
-         " - "
-         (summarize-conversation records))))
+               (js/Date.))
+        summary (summarize-conversation records)
+        base (str "Pi Conversation "
+                  (format-iso-date date)
+                  " "
+                  (format-hour-minute date))]
+    (if summary
+      (str base " - " summary)
+      base)))
 
 (defn compute-journal-int-date
   ([]

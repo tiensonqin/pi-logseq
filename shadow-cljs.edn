@@ -5,7 +5,7 @@
    :output-to "index.js"
    :exports-var pi-logseq.extension/logseq-db-sync-extension
    :compiler-options {
-                      ;; :optimizations      :simple
+                      :optimizations      :simple
                       :infer-externs      :auto
                       :source-map         true
                       :externs ["externs/better-sqlite3.js"]}}}}
