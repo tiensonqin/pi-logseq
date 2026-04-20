@@ -18,6 +18,27 @@
 (def pi-memory-source-turn-property :user.property/pi-memory-source-turn)
 (def pi-memory-deleted-property :user.property/pi-memory-deleted)
 
+(def pi-task-id-property :user.property/pi-task-id)
+(def pi-task-description-property :user.property/pi-task-description)
+(def pi-task-active-form-property :user.property/pi-task-active-form)
+(def pi-task-owner-property :user.property/pi-task-owner)
+
+(def task-tag-ident :logseq.class/Task)
+(def default-task-status "pending")
+
+(def task-status->logseq-status
+  {"pending" :logseq.property/status.todo
+   "in_progress" :logseq.property/status.doing
+   "completed" :logseq.property/status.done})
+
+(def logseq-status->task-status
+  {:logseq.property/status.backlog "pending"
+   :logseq.property/status.todo "pending"
+   :logseq.property/status.doing "in_progress"
+   :logseq.property/status.in-review "in_progress"
+   :logseq.property/status.done "completed"
+   :logseq.property/status.canceled "completed"})
+
 (def uuid-pattern #"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 (def custom-properties
@@ -53,7 +74,19 @@
                                    :logseq.property/hide? true}
    pi-memory-deleted-property {:logseq.property/type :checkbox
                                :db/cardinality :db.cardinality/one
-                               :logseq.property/hide? true}})
+                               :logseq.property/hide? true}
+   pi-task-id-property {:logseq.property/type :default
+                        :db/cardinality :db.cardinality/one
+                        :logseq.property/hide? true}
+   pi-task-description-property {:logseq.property/type :default
+                                 :db/cardinality :db.cardinality/one
+                                 :logseq.property/hide? true}
+   pi-task-active-form-property {:logseq.property/type :default
+                                 :db/cardinality :db.cardinality/one
+                                 :logseq.property/hide? true}
+   pi-task-owner-property {:logseq.property/type :default
+                           :db/cardinality :db.cardinality/one
+                           :logseq.property/hide? true}})
 
 (defn built-in-template-tx
   []
@@ -152,6 +185,72 @@
         month (-> (inc (.getMonth now)) str (.padStart 2 "0"))
         day (-> (.getDate now) str (.padStart 2 "0"))]
     (js/parseInt (str year month day) 10)))
+
+(defn normalize-task-status
+  [value]
+  (let [normalized (if (string? value)
+                     (-> value str/trim str/lower-case (str/replace "-" "_"))
+                     "")]
+    (cond
+      (contains? task-status->logseq-status normalized) normalized
+      (contains? #{"todo" "backlog"} normalized) "pending"
+      (contains? #{"doing" "in_review"} normalized) "in_progress"
+      (contains? #{"done" "canceled" "cancelled"} normalized) "completed"
+      :else default-task-status)))
+
+(defn resolve-task-status-ident
+  [status]
+  (get task-status->logseq-status
+       (normalize-task-status status)
+       :logseq.property/status.todo))
+
+(defn parse-task-id-number
+  [value]
+  (if (and (string? value) (boolean (re-matches #"^\d+$" value)))
+    (js/parseInt value 10)
+    nil))
+
+(defn next-task-id
+  [db]
+  (let [rows (d/q '[:find ?value
+                    :in $ ?property
+                    :where [?b ?property ?value]]
+                  db
+                  pi-task-id-property)
+        max-id (reduce (fn [acc [value]]
+                         (if-let [parsed (parse-task-id-number (scalar-value db value))]
+                           (max acc parsed)
+                           acc))
+                       0
+                       rows)]
+    (str (inc max-id))))
+
+(defn ->task-block
+  [{:keys [id subject description status activeForm owner createdAt updatedAt]}]
+  (let [created-at (long (or createdAt updatedAt (.now js/Date)))
+        updated-at (long (or updatedAt created-at))
+        title (if (and (string? subject) (not= "" (str/trim subject)))
+                (str/trim subject)
+                "Untitled task")
+        properties (cond-> {pi-task-id-property id
+                            pi-task-description-property (if (string? description) description "")
+                            :logseq.property/status (resolve-task-status-ident status)}
+                     (and (string? activeForm) (not= "" (str/trim activeForm)))
+                     (assoc pi-task-active-form-property (str/trim activeForm))
+                     (and (string? owner) (not= "" (str/trim owner)))
+                     (assoc pi-task-owner-property (str/trim owner)))]
+    {:block/title title
+     :block/created-at created-at
+     :block/updated-at updated-at
+     :build/properties properties
+     :block/tags #{task-tag-ident}}))
+
+(defn build-task-export-map
+  [task-record]
+  {:properties custom-properties
+   :pages-and-blocks [{:page {:build/journal (current-journal-int-date)
+                              :build/keep-uuid? true}
+                       :blocks [(->task-block task-record)]}]})
 
 (defn ->memory-block
   [{:keys [id text normalizedText scope type confidence projectKey sourceSessionId sourceTurnId createdAt updatedAt deleted]}]
@@ -326,6 +425,118 @@
                               :block/updated-at (long (.now js/Date))}])
           {:removed true})))))
 
+(defn status-ident-from-value
+  [db value]
+  (cond
+    (qualified-keyword? value) value
+    (number? value) (:db/ident (d/entity db value))
+    (some? (:db/ident value)) (:db/ident value)
+    :else nil))
+
+(defn task-entity-record
+  [db entity-id]
+  (let [entity (d/touch (d/entity db entity-id))
+        task-id (scalar-value db (get entity pi-task-id-property))
+        status-ident (status-ident-from-value db (:logseq.property/status entity))
+        status (get logseq-status->task-status status-ident default-task-status)
+        subject (:block/title entity)
+        description (scalar-value db (get entity pi-task-description-property))
+        active-form (scalar-value db (get entity pi-task-active-form-property))
+        owner (scalar-value db (get entity pi-task-owner-property))
+        created-at (long (or (:block/created-at entity) 0))
+        updated-at (long (or (:block/updated-at entity) created-at 0))]
+    {:id (if (string? task-id) task-id "")
+     :subject (if (string? subject) subject "")
+     :description (if (string? description) description "")
+     :status status
+     :activeForm (when (string? active-form) active-form)
+     :owner (when (string? owner) owner)
+     :createdAt created-at
+     :updatedAt updated-at
+     :logseqStatus status-ident}))
+
+(defn find-task-entity-id
+  [db task-id]
+  (let [rows (d/q '[:find ?e ?value
+                    :in $ ?property
+                    :where [?e ?property ?value]]
+                  db
+                  pi-task-id-property)]
+    (some (fn [[entity-id value]]
+            (when (= task-id (scalar-value db value))
+              entity-id))
+          rows)))
+
+(defn create-task!
+  [conn {:keys [subject description status activeForm owner]}]
+  (let [title (if (string? subject) (str/trim subject) "")
+        desc (if (string? description) description "")
+        now (.now js/Date)]
+    (if (= "" title)
+      {:created false
+       :error "Task subject is required"}
+      (let [task-id (next-task-id @conn)
+            task-record {:id task-id
+                         :subject title
+                         :description desc
+                         :status (normalize-task-status status)
+                         :activeForm activeForm
+                         :owner owner
+                         :createdAt now
+                         :updatedAt now}]
+        (transact-import! conn (build-task-export-map task-record))
+        {:created true
+         :id task-id
+         :status (:status task-record)}))))
+
+(defn list-tasks!
+  [conn _payload]
+  (let [db @conn
+        rows (d/q '[:find ?e
+                    :in $ ?property
+                    :where [?e ?property _]]
+                  db
+                  pi-task-id-property)
+        tasks (->> rows
+                   (map first)
+                   (map #(task-entity-record db %))
+                   (sort-by (fn [{:keys [id]}]
+                              (or (parse-task-id-number id) 0)))
+                   vec)]
+    {:tasks tasks}))
+
+(defn get-task!
+  [conn {:keys [taskId]}]
+  (if-not (string? taskId)
+    {:task nil}
+    (let [db @conn
+          entity-id (find-task-entity-id db taskId)]
+      (if (nil? entity-id)
+        {:task nil}
+        {:task (task-entity-record db entity-id)}))))
+
+(defn update-task!
+  [conn {:keys [taskId] :as payload}]
+  (if-not (string? taskId)
+    {:updated false}
+    (let [db @conn
+          entity-id (find-task-entity-id db taskId)]
+      (if (nil? entity-id)
+        {:updated false}
+        (let [title (when (string? (:subject payload)) (str/trim (:subject payload)))
+              has-status? (contains? payload :status)
+              tx (cond-> {:db/id entity-id
+                          :block/updated-at (long (.now js/Date))}
+                   (and (string? title) (not= "" title))
+                   (assoc :block/title title)
+                   has-status?
+                   (assoc :logseq.property/status (resolve-task-status-ident (:status payload))))]
+          (d/transact! conn [tx])
+          (let [task (task-entity-record @conn entity-id)]
+            {:updated true
+             :taskId taskId
+             :status (:status task)}))))))
+
 (defn handle-action!
   [conn payload]
   (let [action (or (:action payload) "syncConversation")]
@@ -334,6 +545,10 @@
       "upsertMemory" (upsert-memory! conn payload)
       "queryMemory" (query-memory! conn payload)
       "forgetMemory" (forget-memory! conn payload)
+      "createTask" (create-task! conn payload)
+      "listTasks" (list-tasks! conn payload)
+      "getTask" (get-task! conn payload)
+      "updateTask" (update-task! conn payload)
       (throw (js/Error. (str "Unsupported action: " action))))))
 
 (defn execute!

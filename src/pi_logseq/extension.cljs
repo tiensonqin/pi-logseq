@@ -3,6 +3,7 @@
             [goog.object :as gobj]
             [pi-logseq.lib :as lib]
             [pi-logseq.db :as logseq-db]
+            ["@sinclair/typebox" :refer [Type]]
             ["@mariozechner/pi-ai" :refer [complete]]))
 
 (def default-memory-scope "project")
@@ -13,6 +14,38 @@
 (def default-memory-verify-max-per-turn 2)
 (def default-memory-verify-max-per-hour 30)
 (def one-hour-ms (* 60 60 1000))
+(def default-logseq-graph-path "~/logseq/graphs/pi-memory/sqlite.db")
+
+(defn expand-home-path
+  [path]
+  (if (and (string? path) (str/starts-with? path "~"))
+    (let [home (or (gobj/get (.-env js/process) "HOME")
+                 (gobj/get (.-env js/process) "USERPROFILE"))]
+      (if (string? home)
+        (str home (subs path 1))
+        path))
+    path))
+
+(def task-create-parameters
+  (.Object Type
+           #js {:subject (.String Type #js {:description "Task subject"})
+                :description (.Optional Type (.String Type #js {:description "Task description"}))
+                :status (.Optional Type (.String Type #js {:description "pending|in_progress|completed"}))
+                :activeForm (.Optional Type (.String Type #js {:description "Active progress label"}))
+                :owner (.Optional Type (.String Type #js {:description "Task owner"}))}))
+
+(def task-list-parameters
+  (.Object Type #js {}))
+
+(def task-get-parameters
+  (.Object Type
+           #js {:taskId (.String Type #js {:description "Task ID"})}))
+
+(def task-update-parameters
+  (.Object Type
+           #js {:taskId (.String Type #js {:description "Task ID"})
+                :status (.Optional Type (.String Type #js {:description "pending|in_progress|completed"}))
+                :subject (.Optional Type (.String Type #js {:description "Updated subject"}))}))
 
 (defn parse-number-flag
   [value fallback]
@@ -70,11 +103,13 @@
 
 (defn get-graph-path
   [^js pi]
-  (let [graph-path-flag (.getFlag pi "logseq-graph")]
-    (when (string? graph-path-flag)
-      (let [trimmed (str/trim graph-path-flag)]
-        (when (not= "" trimmed)
-          trimmed)))))
+  (let [graph-path-flag (.getFlag pi "logseq-graph")
+        graph-path (if (and (string? graph-path-flag)
+                            (not= "" (str/trim graph-path-flag)))
+                     (str/trim graph-path-flag)
+                     default-logseq-graph-path)]
+    (when graph-path
+      (expand-home-path graph-path))))
 
 (defn collect-sync-records
   [^js ctx]
@@ -146,6 +181,18 @@
   (if (gobj/get ctx "hasUI")
     (.notify ^js (gobj/get ctx "ui") text "info")
     (.write (.-stdout js/process) (str text "\n"))))
+
+(defn tool-text-result
+  ([text]
+   (tool-text-result text nil))
+  ([text details]
+   (clj->js {:content #js [#js {:type "text"
+                                :text text}]
+             :details details})))
+
+(defn format-task-line
+  [task]
+  (str "#" (:id task) " [" (:status task) "] " (:subject task)))
 
 (defn enqueue-task
   [queue-atom task]
@@ -285,7 +332,8 @@
   [^js pi]
   (.registerFlag pi "logseq-graph"
                  (clj->js {:description "Logseq DB graph name/path used by logseq-db-sync extension"
-                           :type "string"}))
+                           :type "string"
+                           :default default-logseq-graph-path}))
 
   (.registerFlag pi "logseq-memory-auto"
                  (clj->js {:description "Enable automatic memory capture to Logseq"
@@ -397,6 +445,14 @@
                                      (when (:removed parsed)
                                        (reset! memory-cache (vec (remove #(= (:id %) memory-id) @memory-cache))))
                                      (= true (:removed parsed)))))))))
+        run-task-action (fn [ctx payload]
+                          (let [graph-path (get-graph-path pi)]
+                            (if-not graph-path
+                              (let [message "Set --logseq-graph to enable Logseq task sync"]
+                                (when (and (some? ctx) (gobj/get ctx "hasUI"))
+                                  (.notify ^js (gobj/get ctx "ui") message "warning"))
+                                (js/Promise.resolve {:error message}))
+                              (run-action script-queue (assoc payload :graphPath graph-path)))))
         auto-capture-memory (fn [messages ctx]
                               (if (or (not @auto-capture-enabled)
                                       (nil? (get-graph-path pi)))
@@ -502,6 +558,110 @@
                                         (.-message error)
                                         (str error))
                                   "error"))))))
+
+    (.registerTool pi
+                   (clj->js {:name "TaskCreate"
+                             :label "TaskCreate"
+                             :description "Create a task persisted to Logseq as a #Task block."
+                             :parameters task-create-parameters
+                             :execute (fn [_toolCallId params _signal _onUpdate ctx]
+                                        (let [payload (cond-> {:action "createTask"
+                                                               :subject (gobj/get params "subject")
+                                                               :description (or (gobj/get params "description") "")}
+                                                        (gobj/containsKey params "status")
+                                                        (assoc :status (gobj/get params "status"))
+                                                        (gobj/containsKey params "activeForm")
+                                                        (assoc :activeForm (gobj/get params "activeForm"))
+                                                        (gobj/containsKey params "owner")
+                                                        (assoc :owner (gobj/get params "owner")))]
+                                          (-> (run-task-action ctx payload)
+                                              (.then (fn [parsed]
+                                                       (cond
+                                                         (:error parsed)
+                                                         (tool-text-result (:error parsed))
+                                                         (:created parsed)
+                                                         (tool-text-result (str "Task #" (:id parsed)
+                                                                                " created with status "
+                                                                                (:status parsed)))
+                                                         :else
+                                                         (tool-text-result "Task creation failed"))))
+                                              (.catch (fn [error]
+                                                        (tool-text-result (if (instance? js/Error error)
+                                                                            (.-message error)
+                                                                            (str error))))))))}))
+
+    (.registerTool pi
+                   (clj->js {:name "TaskList"
+                             :label "TaskList"
+                             :description "List tasks persisted in Logseq by this extension."
+                             :parameters task-list-parameters
+                             :execute (fn [_toolCallId _params _signal _onUpdate ctx]
+                                        (-> (run-task-action ctx {:action "listTasks"})
+                                            (.then (fn [parsed]
+                                                     (if (:error parsed)
+                                                       (tool-text-result (:error parsed))
+                                                       (let [tasks (:tasks parsed)
+                                                             text (if (empty? tasks)
+                                                                    "No tasks found"
+                                                                    (str/join "\n" (map format-task-line tasks)))]
+                                                         (tool-text-result text)))))
+                                            (.catch (fn [error]
+                                                      (tool-text-result (if (instance? js/Error error)
+                                                                          (.-message error)
+                                                                          (str error)))))))}))
+
+    (.registerTool pi
+                   (clj->js {:name "TaskGet"
+                             :label "TaskGet"
+                             :description "Get one task persisted in Logseq by task ID."
+                             :parameters task-get-parameters
+                             :execute (fn [_toolCallId params _signal _onUpdate ctx]
+                                        (-> (run-task-action ctx {:action "getTask"
+                                                                  :taskId (gobj/get params "taskId")})
+                                            (.then (fn [parsed]
+                                                     (if (:error parsed)
+                                                       (tool-text-result (:error parsed))
+                                                       (let [task (:task parsed)]
+                                                         (if-not task
+                                                           (tool-text-result "Task not found")
+                                                           (tool-text-result
+                                                            (str "Task #" (:id task)
+                                                                 " [" (:status task) "] "
+                                                                 (:subject task)
+                                                                 "\n"
+                                                                 (:description task))))))))
+                                            (.catch (fn [error]
+                                                      (tool-text-result (if (instance? js/Error error)
+                                                                          (.-message error)
+                                                                          (str error)))))))}))
+
+    (.registerTool pi
+                   (clj->js {:name "TaskUpdate"
+                             :label "TaskUpdate"
+                             :description "Update task status or subject for a Logseq #Task."
+                             :parameters task-update-parameters
+                             :execute (fn [_toolCallId params _signal _onUpdate ctx]
+                                        (let [payload (cond-> {:action "updateTask"
+                                                               :taskId (gobj/get params "taskId")}
+                                                        (gobj/containsKey params "status")
+                                                        (assoc :status (gobj/get params "status"))
+                                                        (gobj/containsKey params "subject")
+                                                        (assoc :subject (gobj/get params "subject")))]
+                                          (-> (run-task-action ctx payload)
+                                              (.then (fn [parsed]
+                                                       (cond
+                                                         (:error parsed)
+                                                         (tool-text-result (:error parsed))
+                                                         (:updated parsed)
+                                                         (tool-text-result (str "Task #" (:taskId parsed)
+                                                                                " updated to "
+                                                                                (:status parsed)))
+                                                         :else
+                                                         (tool-text-result "Task update failed"))))
+                                              (.catch (fn [error]
+                                                        (tool-text-result (if (instance? js/Error error)
+                                                                            (.-message error)
+                                                                            (str error))))))))}))
 
     (.registerCommand pi "logseq-sync"
                       (clj->js {:description "Sync current session and memory to Logseq DB graph"

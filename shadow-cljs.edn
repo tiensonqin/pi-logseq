@@ -8,4 +8,9 @@
                       :optimizations      :simple
                       :infer-externs      :auto
                       :source-map         true
-                      :externs ["externs/better-sqlite3.js"]}}}}
+                      :externs ["externs/better-sqlite3.js"]}}
+  :test
+  {:target :node-test
+   :output-to "out/node-tests.js"
+   :ns-regexp "-test$"
+   :autorun true}}}

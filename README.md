@@ -7,6 +7,8 @@ Behavior:
 - Adds/updates message blocks on that conversation page.
 - Adds a `[[Conversation Page]]` link block to today's journal page.
 - Saves memory blocks directly to today's journal page.
+- Persists tasks as `#Task` blocks in Logseq journals.
+- Stores task status using Logseq native status values (`Todo`, `Doing`, `Done`).
 - Captures long-term memory automatically with low-cost heuristics.
 - Injects stored memory into context on every turn (including brand-new sessions).
 
@@ -28,6 +30,8 @@ pi \
   --extension /absolute/path/to/index.js \
   --logseq-graph "/absolute/path/to/logseq-graph"
 ```
+
+By default, the extension uses `~/logseq/graphs/pi-memory/sqlite.db`. Pass `--logseq-graph` to override it.
 
 Memory flags:
 - `--logseq-memory-auto true|false`: Enable automatic memory capture (default: `true`).
@@ -53,6 +57,13 @@ Memory:
 - `/memory-off`: Disable automatic memory capture for current run.
 - `/remember <text>`: Add explicit memory immediately.
 - `/forget <id-or-text>`: Soft-delete memory entry by id or text snippet.
+
+Task tools:
+- `TaskCreate`: Create a task in Logseq tagged as `#Task`.
+- `TaskList`: List all persisted tasks.
+- `TaskGet`: Get one task by id.
+- `TaskUpdate`: Update task status/subject.
+- Status mapping: `pending -> Todo`, `in_progress -> Doing`, `completed -> Done`.
 
 ## Notes
 

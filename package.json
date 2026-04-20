@@ -3,9 +3,11 @@
   "type": "commonjs",
   "scripts": {
     "build": "shadow-cljs release extension",
-    "watch": "shadow-cljs watch extension"
+    "watch": "shadow-cljs watch extension",
+    "test": "shadow-cljs compile test"
   },
   "dependencies": {
+    "@sinclair/typebox": "^0.34.41",
     "better-sqlite3": "11.10.0",
     "uuid": "^11.1.0"
   },
