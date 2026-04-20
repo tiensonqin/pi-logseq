@@ -1,9 +1,12 @@
 (ns pi-logseq.db
   (:require [clojure.string :as str]
             [datascript.core :as d]
+            [logseq.db.common.sqlite :as sqlite]
             [logseq.db.common.sqlite-cli :as sqlite-cli]
             [logseq.db.sqlite.create-graph :as sqlite-create-graph]
-            [logseq.db.sqlite.export :as sqlite-export]))
+            [logseq.db.sqlite.export :as sqlite-export]
+            ["node:fs" :as fs]
+            ["node:path" :as path]))
 
 (def pi-message-id-property :user.property/pi-message-id)
 (def pi-message-role-property :user.property/pi-message-role)
@@ -24,20 +27,23 @@
 (def pi-task-owner-property :user.property/pi-task-owner)
 
 (def task-tag-ident :logseq.class/Task)
-(def default-task-status "pending")
+(def default-task-status "todo")
 
 (def task-status->logseq-status
-  {"pending" :logseq.property/status.todo
-   "in_progress" :logseq.property/status.doing
-   "completed" :logseq.property/status.done})
+  {"backlog" :logseq.property/status.backlog
+   "todo" :logseq.property/status.todo
+   "doing" :logseq.property/status.doing
+   "in_review" :logseq.property/status.in-review
+   "done" :logseq.property/status.done
+   "canceled" :logseq.property/status.canceled})
 
 (def logseq-status->task-status
-  {:logseq.property/status.backlog "pending"
-   :logseq.property/status.todo "pending"
-   :logseq.property/status.doing "in_progress"
-   :logseq.property/status.in-review "in_progress"
-   :logseq.property/status.done "completed"
-   :logseq.property/status.canceled "completed"})
+  {:logseq.property/status.backlog "backlog"
+   :logseq.property/status.todo "todo"
+   :logseq.property/status.doing "doing"
+   :logseq.property/status.in-review "in_review"
+   :logseq.property/status.done "done"
+   :logseq.property/status.canceled "canceled"})
 
 (def uuid-pattern #"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
@@ -193,9 +199,6 @@
                      "")]
     (cond
       (contains? task-status->logseq-status normalized) normalized
-      (contains? #{"todo" "backlog"} normalized) "pending"
-      (contains? #{"doing" "in_review"} normalized) "in_progress"
-      (contains? #{"done" "canceled" "cancelled"} normalized) "completed"
       :else default-task-status)))
 
 (defn resolve-task-status-ident
@@ -551,9 +554,26 @@
       "updateTask" (update-task! conn payload)
       (throw (js/Error. (str "Unsupported action: " action))))))
 
+(defn resolve-db-path
+  [open-db-args]
+  (case (count open-db-args)
+    1 (first open-db-args)
+    2 (let [[db-dir graph-name] open-db-args]
+        (second (sqlite/get-db-full-path db-dir graph-name)))
+    nil))
+
+(defn ensure-db-parent-dir!
+  [open-db-args]
+  (when-let [db-path (resolve-db-path open-db-args)]
+    (let [parent-dir (.dirname path db-path)]
+      (when (and (string? parent-dir) (not= "" (str/trim parent-dir)))
+        (.mkdirSync fs parent-dir #js {:recursive true}))))
+  open-db-args)
+
 (defn execute!
   [{:keys [graphPath] :as payload}]
   (let [open-db-args (sqlite-cli/->open-db-args graphPath)
+        _ (ensure-db-parent-dir! open-db-args)
         conn (apply sqlite-cli/open-db! open-db-args)]
     (ensure-built-ins! conn)
     (handle-action! conn payload)))

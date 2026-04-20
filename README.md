@@ -63,7 +63,7 @@ Task tools:
 - `TaskList`: List all persisted tasks.
 - `TaskGet`: Get one task by id.
 - `TaskUpdate`: Update task status/subject.
-- Status mapping: `pending -> Todo`, `in_progress -> Doing`, `completed -> Done`.
+- Status values: `backlog`, `todo`, `doing`, `in_review`, `done`, `canceled`.
 
 ## Notes
 

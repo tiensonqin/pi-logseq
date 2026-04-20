@@ -1,2 +1,3 @@
 - Logseq project: ~/Codes/projects/logseq/
 - Pi project: ~/Codes/projects/pi-mono/
+- Never read index.js

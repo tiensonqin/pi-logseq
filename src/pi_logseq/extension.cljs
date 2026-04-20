@@ -30,7 +30,7 @@
   (.Object Type
            #js {:subject (.String Type #js {:description "Task subject"})
                 :description (.Optional Type (.String Type #js {:description "Task description"}))
-                :status (.Optional Type (.String Type #js {:description "pending|in_progress|completed"}))
+                :status (.Optional Type (.String Type #js {:description "backlog|todo|doing|in_review|done|canceled"}))
                 :activeForm (.Optional Type (.String Type #js {:description "Active progress label"}))
                 :owner (.Optional Type (.String Type #js {:description "Task owner"}))}))
 
@@ -44,7 +44,7 @@
 (def task-update-parameters
   (.Object Type
            #js {:taskId (.String Type #js {:description "Task ID"})
-                :status (.Optional Type (.String Type #js {:description "pending|in_progress|completed"}))
+                :status (.Optional Type (.String Type #js {:description "backlog|todo|doing|in_review|done|canceled"}))
                 :subject (.Optional Type (.String Type #js {:description "Updated subject"}))}))
 
 (defn parse-number-flag

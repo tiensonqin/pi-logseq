@@ -28,26 +28,26 @@
         [title description status-ident tag-ident] (fetch-task-row conn "1")]
     (is (= true (:created created)))
     (is (= "1" (:id created)))
-    (is (= "pending" (:status created)))
+    (is (= "todo" (:status created)))
     (is (= "Write regression tests" title))
     (is (= "Cover task sync behavior." description))
     (is (= :logseq.property/status.todo status-ident))
     (is (= :logseq.class/Task tag-ident))))
 
-(deftest list-tasks-returns-pi-style-statuses
+(deftest list-tasks-returns-logseq-statuses
   (let [conn (new-test-conn)]
     (db/handle-action! conn {:action "createTask"
                              :subject "Task A"
                              :description "A"
-                             :status "pending"})
+                             :status "todo"})
     (db/handle-action! conn {:action "createTask"
                              :subject "Task B"
                              :description "B"
-                             :status "completed"})
+                             :status "done"})
     (let [listed (db/handle-action! conn {:action "listTasks"})
           tasks (:tasks listed)]
       (is (= 2 (count tasks)))
-      (is (= ["pending" "completed"]
+      (is (= ["todo" "done"]
              (mapv :status tasks))))))
 
 (deftest update-task-translates-status-to-logseq-doing
@@ -57,11 +57,21 @@
                              :description "Initial description"})
     (let [updated (db/handle-action! conn {:action "updateTask"
                                            :taskId "1"
-                                           :status "in_progress"
+                                           :status "doing"
                                            :subject "Updated title"})
           [title description status-ident _] (fetch-task-row conn "1")]
       (is (= true (:updated updated)))
-      (is (= "in_progress" (:status updated)))
+      (is (= "doing" (:status updated)))
       (is (= "Updated title" title))
       (is (= "Initial description" description))
       (is (= :logseq.property/status.doing status-ident)))))
+
+(deftest create-task-invalid-status-falls-back-to-default
+  (let [conn (new-test-conn)
+        created (db/handle-action! conn {:action "createTask"
+                                         :subject "Work item"
+                                         :status "working"})
+        [_ _ status-ident _] (fetch-task-row conn "1")]
+    (is (= true (:created created)))
+    (is (= "todo" (:status created)))
+    (is (= :logseq.property/status.todo status-ident))))
