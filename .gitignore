@@ -1,6 +1,5 @@
 .shadow-cljs/
 .cpcache/
 node_modules/
-index.js
 index.js.map
 out/
