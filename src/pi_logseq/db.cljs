@@ -156,7 +156,6 @@
   [{:keys [id text normalizedText scope type confidence projectKey sourceSessionId sourceTurnId createdAt updatedAt deleted]}]
   (let [created-at (long (or createdAt updatedAt (.now js/Date)))
         updated-at (long (or updatedAt created-at))
-        block-uuid (uuid id)
         properties (cond-> {pi-memory-id-property id
                             pi-memory-normalized-property normalizedText
                             pi-memory-scope-property scope
@@ -166,8 +165,7 @@
                             pi-memory-source-session-property sourceSessionId
                             pi-memory-deleted-property (boolean deleted)}
                      (some? sourceTurnId) (assoc pi-memory-source-turn-property sourceTurnId))]
-    {:block/uuid block-uuid
-     :block/title text
+    {:block/title text
      :block/created-at created-at
      :block/updated-at updated-at
      :build/properties properties}))
