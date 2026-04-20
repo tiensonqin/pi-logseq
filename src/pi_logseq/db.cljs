@@ -1,6 +1,5 @@
-(ns sync-logseq-db
+(ns pi-logseq.db
   (:require [clojure.string :as str]
-            ["fs" :as fs]
             [datascript.core :as d]
             [logseq.db.common.sqlite-cli :as sqlite-cli]
             [logseq.db.sqlite.create-graph :as sqlite-create-graph]
@@ -62,14 +61,7 @@
 
 (defn ensure-built-ins!
   [conn]
-  ;; Mirrors logseq.outliner.cli/init-conn setup-init-data behavior for DB graphs:
-  ;; always transact initial built-in ontology/config entities before importing.
   (d/transact! conn (built-in-template-tx)))
-
-(defn read-payload [payload-path]
-  (-> (fs/readFileSync payload-path "utf8")
-      js/JSON.parse
-      (js->clj :keywordize-keys true)))
 
 (defn scalar-value
   [db value]
@@ -85,8 +77,8 @@
       (boolean? value) value
       (nil? value) nil
       (number? value) (let [ent (d/entity db value)]
-                         (or (and ent (entity-scalar (d/touch ent)))
-                             value))
+                        (or (and ent (entity-scalar (d/touch ent)))
+                            value))
       (some? (:db/id value)) (scalar-value db (:db/id value))
       :else
       (let [ent (d/entity db value)]
@@ -131,7 +123,8 @@
         journal-int-date
         (str "[[" conversation-page-title "]]"))))
 
-(defn ->message-block [{:keys [id role text timestamp]}]
+(defn ->message-block
+  [{:keys [id role text timestamp]}]
   {:block/title (str "[" role "] " text)
    :block/created-at (long timestamp)
    :block/updated-at (long timestamp)
@@ -346,17 +339,3 @@
         conn (apply sqlite-cli/open-db! open-db-args)]
     (ensure-built-ins! conn)
     (handle-action! conn payload)))
-
-(defn -main [& args]
-  (let [payload-path (first args)]
-    (when-not (and payload-path (fs/existsSync payload-path))
-      (js/console.error "Expected payload path as first argument")
-      (js/process.exit 1))
-    (try
-      (let [result (-> payload-path read-payload execute!)]
-        (js/console.log (js/JSON.stringify (clj->js (assoc result :ok true)))))
-      (catch :default err
-        (js/console.error (or (.-stack err) (str err)))
-        (js/process.exit 1)))))
-
-(apply -main *command-line-args*)

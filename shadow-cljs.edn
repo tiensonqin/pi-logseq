@@ -1,0 +1,9 @@
+{:deps true
+ :builds
+ {:extension
+  {:target :node-library
+   :output-to "index.js"
+   :exports-var pi-logseq.extension/logseq-db-sync-extension
+   :compiler-options {:optimizations      :simple
+                      :infer-externs      :auto
+                      :source-map         true}}}}

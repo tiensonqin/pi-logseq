@@ -1,8 +1,15 @@
 {
   "name": "pi-logseq",
-  "private": true,
-  "type": "module",
+  "type": "commonjs",
+  "scripts": {
+    "build": "shadow-cljs release extension",
+    "watch": "shadow-cljs watch extension"
+  },
   "dependencies": {
+    "better-sqlite3": "11.10.0",
     "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "shadow-cljs": "^3.4.4"
   }
 }

@@ -1,6 +1,6 @@
 # logseq-db-sync
 
-Syncs pi session history into a Logseq DB graph through [`nbb-logseq`](https://github.com/logseq/logseq/tree/master/deps/db).
+Syncs pi session history into a Logseq DB graph through a single root `index.js` extension bundle.
 
 Behavior:
 - Creates one Logseq page per pi conversation/session.
@@ -12,23 +12,22 @@ Behavior:
 
 ## Setup
 
-1. Install script dependencies:
+1. Build the extension bundle:
 
 ```bash
-cd packages/coding-agent/examples/extensions/logseq-db-sync/scripts
 npm install
+npm run build
 ```
 
-2. Start pi with the extension:
+`shadow-cljs` is build-time only. Runtime execution only needs the generated root `index.js`.
+
+2. Start pi with the extension bundle:
 
 ```bash
 pi \
-  --extension packages/coding-agent/examples/extensions/logseq-db-sync/index.ts \
+  --extension /absolute/path/to/index.js \
   --logseq-graph "/absolute/path/to/logseq-graph"
 ```
-
-Optional flags:
-- `--logseq-nbb-root "~/Codes/projects/nbb-logseq"`: Override local `nbb-logseq` path.
 
 Memory flags:
 - `--logseq-memory-auto true|false`: Enable automatic memory capture (default: `true`).
@@ -45,7 +44,7 @@ Memory flags:
 
 Conversation sync:
 - `/logseq-sync`: Manual conversation sync.
-- `/logseq-sync-status`: Show extension configuration and dependency status.
+- `/logseq-sync-status`: Show extension configuration and memory runtime status.
 
 Memory:
 - `/memory`: Show currently loaded Logseq memory records.
@@ -57,6 +56,7 @@ Memory:
 
 ## Notes
 
-- Conversation sync and memory storage use the same script entrypoint (`sync-logseq-db.cljs`) with different actions.
+- All extension logic is implemented in ClojureScript and compiled into the root `index.js`.
+- Runtime does not invoke `shadow-cljs` or any subprocess build step.
 - Memory injection is transient (`context` hook), so it does not bloat session history.
 - With verifier model disabled, the extension runs fully model-free for minimum cost.

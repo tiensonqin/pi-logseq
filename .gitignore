@@ -1,3 +1,5 @@
-scripts/.nbb/
-scripts/node_modules/
+.shadow-cljs/
+.cpcache/
 node_modules/
+index.js
+index.js.map
