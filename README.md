@@ -1,4 +1,4 @@
-# logseq-db-sync
+# pi-logseq
 
 Syncs pi session history into a Logseq DB graph through a single root `index.js` extension bundle.
 
