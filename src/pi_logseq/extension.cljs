@@ -126,14 +126,20 @@
                         records)]
     (vals deduped)))
 
-(defn build-sync-payload
-  [ctx graph-path]
+(defn resolve-conversation-page-title
+  [ctx]
   (let [^js session-manager (gobj/get ctx "sessionManager")
         header (.getHeader session-manager)
         records (collect-sync-records ctx)]
+    (lib/build-conversation-page-title records (gobj/get header "timestamp"))))
+
+(defn build-sync-payload
+  [ctx graph-path]
+  (let [^js session-manager (gobj/get ctx "sessionManager")
+        records (collect-sync-records ctx)]
     {:action "syncConversation"
      :graphPath graph-path
-     :conversationPageTitle (lib/build-conversation-page-title records (gobj/get header "timestamp"))
+     :conversationPageTitle (resolve-conversation-page-title ctx)
      :sessionId (.getSessionId session-manager)
      :sessionFile (.getSessionFile session-manager)
      :journalIntDate (lib/compute-journal-int-date)
@@ -446,13 +452,26 @@
                                        (reset! memory-cache (vec (remove #(= (:id %) memory-id) @memory-cache))))
                                      (= true (:removed parsed)))))))))
         run-task-action (fn [ctx payload]
-                          (let [graph-path (get-graph-path pi)]
-                            (if-not graph-path
+                          (let [graph-path (get-graph-path pi)
+                                is-create-task (= "createTask" (:action payload))
+                                conversation-page-title (when (and is-create-task (some? ctx))
+                                                          (resolve-conversation-page-title ctx))]
+                            (cond
+                              (not graph-path)
                               (let [message "Set --logseq-graph to enable Logseq task sync"]
                                 (when (and (some? ctx) (gobj/get ctx "hasUI"))
                                   (.notify ^js (gobj/get ctx "ui") message "warning"))
                                 (js/Promise.resolve {:error message}))
-                              (run-action script-queue (assoc payload :graphPath graph-path)))))
+
+                              (and is-create-task
+                                   (or (not (string? conversation-page-title))
+                                       (= "" (str/trim conversation-page-title))))
+                              (js/Promise.resolve {:error "Conversation context unavailable for task creation"})
+
+                              :else
+                              (run-action script-queue
+                                          (cond-> (assoc payload :graphPath graph-path)
+                                            is-create-task (assoc :conversationPageTitle conversation-page-title))))))
         auto-capture-memory (fn [messages ctx]
                               (if (or (not @auto-capture-enabled)
                                       (nil? (get-graph-path pi)))

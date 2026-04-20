@@ -249,10 +249,12 @@
      :block/tags #{task-tag-ident}}))
 
 (defn build-task-export-map
-  [task-record]
+  [task-record conversation-page-title]
   {:properties custom-properties
-   :pages-and-blocks [{:page {:build/journal (current-journal-int-date)
-                              :build/keep-uuid? true}
+   :classes {:user.class/Chat {}}
+   :pages-and-blocks [{:page {:block/title conversation-page-title
+                              :build/keep-uuid? true
+                              :build/tags [:user.class/Chat]}
                        :blocks [(->task-block task-record)]}]})
 
 (defn ->memory-block
@@ -471,13 +473,21 @@
           rows)))
 
 (defn create-task!
-  [conn {:keys [subject description status activeForm owner]}]
+  [conn {:keys [subject description status activeForm owner conversationPageTitle]}]
   (let [title (if (string? subject) (str/trim subject) "")
         desc (if (string? description) description "")
+        conversation-page-title (if (string? conversationPageTitle) (str/trim conversationPageTitle) "")
         now (.now js/Date)]
-    (if (= "" title)
+    (cond
+      (= "" title)
       {:created false
        :error "Task subject is required"}
+
+      (= "" conversation-page-title)
+      {:created false
+       :error "Conversation page title is required"}
+
+      :else
       (let [task-id (next-task-id @conn)
             task-record {:id task-id
                          :subject title
@@ -487,7 +497,7 @@
                          :owner owner
                          :createdAt now
                          :updatedAt now}]
-        (transact-import! conn (build-task-export-map task-record))
+        (transact-import! conn (build-task-export-map task-record conversation-page-title))
         {:created true
          :id task-id
          :status (:status task-record)}))))

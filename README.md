@@ -7,7 +7,7 @@ Behavior:
 - Adds/updates message blocks on that conversation page.
 - Adds a `[[Conversation Page]]` link block to today's journal page.
 - Saves memory blocks directly to today's journal page.
-- Persists tasks as `#Task` blocks in Logseq journals.
+- Persists tasks as `#Task` blocks directly on the active conversation page.
 - Stores task status using Logseq native status values (`Todo`, `Doing`, `Done`).
 - Captures long-term memory automatically with low-cost heuristics.
 - Injects stored memory into context on every turn (including brand-new sessions).

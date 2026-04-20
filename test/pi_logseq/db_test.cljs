@@ -1,8 +1,10 @@
 (ns pi-logseq.db-test
-  (:require [cljs.test :refer [deftest is testing]]
+  (:require [cljs.test :refer [deftest is]]
             [datascript.core :as d]
             [logseq.db.frontend.schema :as db-schema]
             [pi-logseq.db :as db]))
+
+(def conversation-page-title "Pi Conversation 2026-04-20 13:33")
 
 (defn new-test-conn
   []
@@ -17,8 +19,9 @@
         entity (when entity-id (d/touch (d/entity db entity-id)))
         status-ident (:db/ident (:logseq.property/status entity))
         tag-ident (:db/ident (first (:block/tags entity)))
-        description (db/scalar-value db (get entity :user.property/pi-task-description))]
-    [(:block/title entity) description status-ident tag-ident]))
+        description (db/scalar-value db (get entity :user.property/pi-task-description))
+        page-title (db/scalar-value db (:block/page entity))]
+    [(:block/title entity) description status-ident tag-ident page-title]))
 
 (defn message-id-set
   [conn]
@@ -34,7 +37,7 @@
          set)))
 
 (defn journal-link-count
-  [conn journal-day conversation-page-title]
+  [conn journal-day page-title]
   (d/q '[:find (count ?b) .
          :in $ ?journal-day ?link-title
          :where
@@ -43,29 +46,40 @@
          [?b :block/title ?link-title]]
        @conn
        journal-day
-       (str "[[" conversation-page-title "]]")))
+       (str "[[" page-title "]]")))
 
 (deftest create-task-stores-task-tag-and-logseq-status
   (let [conn (new-test-conn)
         created (db/handle-action! conn {:action "createTask"
+                                         :conversationPageTitle conversation-page-title
                                          :subject "Write regression tests"
                                          :description "Cover task sync behavior."})
-        [title description status-ident tag-ident] (fetch-task-row conn "1")]
+        [title description status-ident tag-ident page-title] (fetch-task-row conn "1")]
     (is (= true (:created created)))
     (is (= "1" (:id created)))
     (is (= "todo" (:status created)))
     (is (= "Write regression tests" title))
     (is (= "Cover task sync behavior." description))
     (is (= :logseq.property/status.todo status-ident))
-    (is (= :logseq.class/Task tag-ident))))
+    (is (= :logseq.class/Task tag-ident))
+    (is (= conversation-page-title page-title))))
+
+(deftest create-task-requires-conversation-page-title
+  (let [conn (new-test-conn)
+        created (db/handle-action! conn {:action "createTask"
+                                         :subject "Task without context"})]
+    (is (= false (:created created)))
+    (is (= "Conversation page title is required" (:error created)))))
 
 (deftest list-tasks-returns-logseq-statuses
   (let [conn (new-test-conn)]
     (db/handle-action! conn {:action "createTask"
+                             :conversationPageTitle conversation-page-title
                              :subject "Task A"
                              :description "A"
                              :status "todo"})
     (db/handle-action! conn {:action "createTask"
+                             :conversationPageTitle conversation-page-title
                              :subject "Task B"
                              :description "B"
                              :status "done"})
@@ -78,13 +92,14 @@
 (deftest update-task-translates-status-to-logseq-doing
   (let [conn (new-test-conn)]
     (db/handle-action! conn {:action "createTask"
+                             :conversationPageTitle conversation-page-title
                              :subject "Initial title"
                              :description "Initial description"})
     (let [updated (db/handle-action! conn {:action "updateTask"
                                            :taskId "1"
                                            :status "doing"
                                            :subject "Updated title"})
-          [title description status-ident _] (fetch-task-row conn "1")]
+          [title description status-ident _ _] (fetch-task-row conn "1")]
       (is (= true (:updated updated)))
       (is (= "doing" (:status updated)))
       (is (= "Updated title" title))
@@ -94,9 +109,10 @@
 (deftest create-task-invalid-status-falls-back-to-default
   (let [conn (new-test-conn)
         created (db/handle-action! conn {:action "createTask"
+                                         :conversationPageTitle conversation-page-title
                                          :subject "Work item"
                                          :status "working"})
-        [_ _ status-ident _] (fetch-task-row conn "1")]
+        [_ _ status-ident _ _] (fetch-task-row conn "1")]
     (is (= true (:created created)))
     (is (= "todo" (:status created)))
     (is (= :logseq.property/status.todo status-ident))))
@@ -104,6 +120,7 @@
 (deftest create-task-requires-non-empty-subject
   (let [conn (new-test-conn)
         created (db/handle-action! conn {:action "createTask"
+                                         :conversationPageTitle conversation-page-title
                                          :subject "   "
                                          :description "ignored"})]
     (is (= false (:created created)))
@@ -113,7 +130,7 @@
 (deftest sync-conversation-dedupes-messages-and-links-journal-once
   (let [conn (new-test-conn)
         payload {:action "syncConversation"
-                 :conversationPageTitle "Pi Conversation 2026-04-20 13:33"
+                 :conversationPageTitle conversation-page-title
                  :journalIntDate 20260420
                  :records [{:id "m-1" :role "user" :text "Hello" :timestamp 1000}
                            {:id "m-2" :role "assistant" :text "Hi" :timestamp 2000}]}
@@ -124,7 +141,7 @@
     (is (= {:createdMessages 2 :linkedInJournal true} first-sync))
     (is (= {:createdMessages 1 :linkedInJournal false} second-sync))
     (is (= #{"m-1" "m-2" "m-3"} (message-id-set conn)))
-    (is (= 1 (journal-link-count conn 20260420 "Pi Conversation 2026-04-20 13:33")))))
+    (is (= 1 (journal-link-count conn 20260420 conversation-page-title)))))
 
 (deftest memory-lifecycle-upsert-query-forget
   (let [conn (new-test-conn)
@@ -199,11 +216,12 @@
 (deftest update-task-accepts-hyphenated-status-values
   (let [conn (new-test-conn)]
     (db/handle-action! conn {:action "createTask"
+                             :conversationPageTitle conversation-page-title
                              :subject "Review PR"})
     (let [updated (db/handle-action! conn {:action "updateTask"
                                            :taskId "1"
                                            :status "in-review"})
-          [_ _ status-ident _] (fetch-task-row conn "1")]
+          [_ _ status-ident _ _] (fetch-task-row conn "1")]
       (is (= true (:updated updated)))
       (is (= "in_review" (:status updated)))
       (is (= :logseq.property/status.in-review status-ident)))))

@@ -76,9 +76,7 @@
                (js/Date. session-timestamp)
                (js/Date.))
         summary (summarize-conversation records)
-        base (str "Pi Conversation "
-                  (format-iso-date date)
-                  " "
+        base (str "Pi "
                   (format-hour-minute date))]
     (if summary
       (str base " - " summary)
